@@ -1,0 +1,610 @@
+---
+title: "assignment1"
+author: "Julia Jimenez, Ainhoa López, Alba Peña"
+date: "2025-05-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## QUESTION #1: Load, adapt the data and create metadata
+
+```{r}
+library(readr)
+#
+gene_data <- read.csv("SRP171981.tsv", sep = ",", row.names=1)
+
+metadata <- read.csv(file="metadata_SRP171981.csv", sep=";", row.names = 1)
+```
+
+In order to merge both tables we transpose the gene data table to have the sample codes as rows and the genes as columns, doing this we can easily merge this table into the metadata to add the gene columns to each sample in order to know their expressions
+
+```{r,message=TRUE, results='hide'}
+library(dplyr)
+colnames(gene_data) == rownames(metadata)
+
+gene_data <- gene_data[,rownames(metadata)]
+colnames(gene_data) == rownames(metadata)
+
+#canviar genedata 2 por genedata
+
+
+# gene_data : samples as columns , genes as rows
+# gene_data2 : samples as rows, genes as columns)
+```
+
+Now in merged_data we have all the samples as rows and for each sample we are able to see sex, diet, specimen_part, replicate and all the expressed genes.
+
+
+## QUESTION #2: PCA representation
+In order to perform the PCA representation we will work with the expression genes values from gene_data2, due to the requirement to work with numerical variables to identify major patterns in gene expression across the different samples.
+
+```{r}
+library(ggfortify)
+library(factoextra)
+library(ggplot2)
+library(ggpubr)
+
+# This commented line fails to convert all the characters of gene_data2 to numeric values and the prcomp() function fails to perform the pca so, we must remove the columns with zero variance or null values 
+#pca_data <- as.matrix(gene_data2)
+# Transpose gene_data: now samples are rows, genes are columns
+gene_data <- as.data.frame(t(gene_data))
+
+# Clean of gene_data. 
+# Keep only numeric gene expression columns (most likely all)
+gene_data <- gene_data[, sapply(gene_data, is.numeric)] # Select numeric columns
+gene_data <- gene_data[, colSums(is.na(gene_data)) == 0] # Remove NA columns
+gene_data <- gene_data[, colSums(gene_data) > 0] # Remove zero-sum columns
+gene_data <- gene_data[, apply(gene_data, 2, var) > 0] # Remove zero-variance columns
+
+```
+
+
+Using a scaled PCA approach all the variables (genes in this case) contribute equally to the PCA in terms of relative variance, all genes contribute equally in weight, but the ones with greater patterned variation across samples will influence more in PC
+
+
+NON SCALED PCA
+```{r}
+pca_result <- prcomp(gene_data, center = TRUE, scale. = FALSE)
+summary(pca_result)
+
+# Store the principal components scores 
+results <- as.data.frame(pca_result$x)
+
+factoextra::fviz_eig(pca_result, addlabels = TRUE, barfill = "steelblue")
+```
+
+
+```{r}
+library(ggplot2)
+data_plot <- data.frame(
+  ID = rownames(gene_data),
+  x = pca_result$x[, 1],
+  y = pca_result$x[, 2])
+
+data_plot$Diet <- metadata[rownames(data_plot), "Diet"]
+data_plot$Sex <- metadata[rownames(data_plot), "Sex"]
+
+
+ggplot(data_plot, aes(x = x, y = y, color = Diet)) +
+  geom_point(size = 3) +
+  labs(title = "PCA of Gene Expression (PC1 vs PC2)", x = "PC1", y = "PC2") +
+  theme_minimal()
+```
+
+```{r message=FALSE}
+library(ggpubr)
+library(ggalt)
+library(ggrepel)
+
+non_scaled_plot <-ggplot(data_plot, aes(x = x, y = y)) + 
+  geom_point(aes(colour = Diet)) + 
+  ggtitle("Plot for PCA points") + 
+  theme_classic() + 
+  
+  geom_label_repel(data = data_plot,
+                   aes(x = x, y = y, label = ID), max.overlaps = 10) + 
+  
+  geom_encircle(aes(group = Diet, color = Diet), alpha = 1, 
+                show.legend = TRUE, linetype = 2, s_shape = 0.5, expand = 0) +
+  
+  xlab("PC1") + ylab("PC2") + 
+  labs(color = "Diet")
+
+```
+
+```{r}
+#outliers 
+datapoints <- data.frame(pca_result$x)
+abs_datapoints <- abs(datapoints)
+max_abs_value <- max(abs_datapoints, na.rm = TRUE)
+max_position <- which(abs_datapoints == max_abs_value, arr.ind = TRUE)
+outlier_sample <- rownames(datapoints)[max_position[1]]
+
+
+row_name <- rownames(datapoints)[max_position[1]]
+col_name <- colnames(datapoints)[max_position[2]]
+```
+
+```{r}
+#Remove outliers and a copy of the data in OG variables (with outliers)
+OG_data <- gene_data
+OG_metadata <- metadata
+
+# Remove outliers, nbow in gene_data we have the clean data with oinly numeric values and with the outliers removed
+gene_data <- gene_data[-max_position[1],]
+metadata <- metadata[-max_position[1],]
+
+#Gene_data_transposed contains the same information as gene_data but transposed (genes in rows, samples as columns) .
+gene_data_transposed <- as.data.frame(t(gene_data))
+
+```
+
+
+### Scale the data
+
+```{r}
+pca_result_scaled <- prcomp(gene_data, center = TRUE, scale. = TRUE)
+summary(pca_result_scaled)
+
+# Store the principal components scores 
+results <- as.data.frame(pca_result_scaled$x)
+
+factoextra::fviz_eig(pca_result_scaled, addlabels = TRUE, barfill = "steelblue")
+```
+
+Now we can see how the variation is not only explained by the first dimension, the variation is distributed between several components
+
+```{r}
+library(ggpubr)
+library(ggalt)
+library(ggrepel)
+
+data_plot_scaled <- data.frame(
+  ID = rownames(gene_data),
+  x = pca_result_scaled$x[, 1],
+  y = pca_result_scaled$x[, 2],
+  Diet = metadata[rownames(gene_data), "Diet"]
+)
+data_plot_scaled$Diet <- as.factor(data_plot_scaled$Diet)
+
+scaled_plot <- ggplot(data_plot_scaled, aes(x = x, y = y)) + 
+  geom_point(aes(colour = Diet)) + 
+  ggtitle("PCA of Gene Expression (Scaled, Outlier Removed)") + 
+  theme_classic() + 
+  geom_label_repel(aes(label = ID), max.overlaps = 10) + 
+  geom_encircle(aes(group = Diet, color = Diet), 
+                alpha = 1, linetype = 2, s_shape = 0.5, expand = 0) +
+  xlab("PC1") + ylab("PC2") + 
+  labs(color = "Diet")
+```
+
+
+### Normalize the data
+
+```{r}
+gene_data_norm<- as.matrix(gene_data)
+gene_data_norm <- gene_data_norm[, colSums(gene_data_norm) > 0]
+Y = gene_data_norm/rowSums(gene_data_norm)
+Y <- Y[, colSums(Y) > 0]
+pca_norm <- stats::prcomp(Y,scale=T)
+
+```
+
+
+As alternative we can use autoplot to visualize this results
+
+```{r}
+library(ggfortify)
+gene_data_norm <- as.data.frame(gene_data)
+ggplot2::autoplot(pca_norm, data = metadata, colour = "Diet",
+                  frame = TRUE, frame.type = "norm") +
+  theme_classic()
+
+
+```
+
+This PCA plot shows how gene expression differs between samples based on their diet. The data was cleaned and normalized to reduce errors and focus on real biological differences. PC1 separates samples clearly by diet, showing that diet is the main factor affecting gene expression. PC2 shows other differences, like those related to sex or tissue type. The circles around each diet group show where most samples fall because if they don’t overlap, it means the diets are quite different and if they do it means the groups share some similarities. Overall, this plot confirms that diet plays a big role in shaping gene expression, while other factors and individual differences also contribute.
+
+
+
+```{r}
+#outliers 
+datapoints <- data.frame(pca_norm$x)
+abs_datapoints  <- abs(datapoints)
+max_abs_value <- max(abs_datapoints, na.rm = TRUE)
+max_position <- which(abs_datapoints == max_abs_value, arr.ind = TRUE)
+
+row_name <- rownames(datapoints)[max_position[1]]
+col_name <- colnames(datapoints)[max_position[2]]
+ 
+```
+
+```{r}
+gene_data_norm_with_OTL <- gene_data_norm
+metadata_outliers_norm <- metadata
+
+#Remove outliers
+gene_data_norm <- gene_data_norm[-max_position[1],]
+metadata_norm <- metadata[-max_position[1],]
+```
+
+```{r}
+# Perform the PCA once we have applied the outliers to the normalized data
+pca_numeric_norm <- gene_data_norm[, sapply(gene_data_norm, is.numeric)]
+pca_numeric_norm <- pca_numeric_norm[, colSums(is.na(pca_numeric_norm)) == 0]
+pca_numeric_norm <- pca_numeric_norm[, colSums(pca_numeric_norm) > 0]
+pca_numeric_norm <- pca_numeric_norm[, apply(pca_numeric_norm, 2, var) > 0]
+
+
+pca_norm <- prcomp(pca_numeric_norm, center = TRUE, scale. = TRUE)
+summary(pca_norm)
+
+data_plot_norm <- data.frame(
+  ID = rownames(pca_numeric_norm),
+  PC1 = pca_norm$x[, 1],
+  PC2 = pca_norm$x[, 2],
+  Diet = metadata_norm[rownames(pca_numeric_norm), "Diet"],
+  Sex = metadata_norm[rownames(pca_numeric_norm), "sex"]
+)
+
+
+normalized_plot <- ggplot(data_plot_norm, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = Diet, shape = Sex)) +
+  ggtitle("PCA of Gene Expression (Normalized, Outlier Removed)") +
+  theme_classic() +
+  geom_label_repel(aes(label = ID), max.overlaps = 10) +
+  geom_encircle(aes(group = Diet, color = Diet), 
+                alpha = 1, linetype = 2, s_shape = 0.5, expand = 0) +
+  xlab("PC1") + 
+  ylab("PC2") +
+  labs(color = "Diet", shape = "Sex")
+```
+
+```{r}
+non_scaled_plot
+scaled_plot
+normalized_plot
+```
+
+# Non-scaled PCA plot interpretation
+
+This plot shows how gene expression changes across samples without adjusting for how much each gene varies. This means genes that change a lot have more influence on the results. The plot shows that diet is the main factor separating the samples, with HighFat and Regular diets forming different groups, especially along PC1. There might also be some grouping by sex, but it’s not as clear as the diet difference. Outliers are samples that don’t fit well with their group and might need more study. 
+
+
+# Scaled PCA plot interpretation
+This plot shows how gene expression varies across samples, with all genes contributing equally regardless of how much they vary. Unlike the non-scaled PCA, scaling prevents genes with large differences from dominating the results, allowing us to see clearer biological patterns. The clear separation along PC1 shows that diet is the main factor affecting gene expression. PC2 likely captures other differences, such as individual variation or interactions with factors like sex. Sample labels help identify specific points, including any outliers.
+
+
+
+# Normalized PCA plot interpretation
+
+This plot shows how gene expression changes across samples, making sure all genes are included. Unlike the non-scaled plot, normalization balances out big differences between genes, so it’s easier to see real biological patterns. The separation along PC1 means diet is the main reason for differences in gene expression, while PC2 shows other factors such as sex. Compared to the other plots, this normalized one gives the clearest view of how diet influences gene expression by cutting down on technical noise and variation.
+
+
+
+## Question 3: t-SNE Representation
+
+Represent the data with a tSNE projection: raw data and normalized.
+```{r}
+# Use scaled, unscaled, and normalized versions of the expression data
+# raw_data = gene_data
+
+raw_data <- gene_data
+# Normalize: rows are samples, columns are genes
+normalized_data <-  pca_numeric_norm
+
+```
+
+### Creating t-SNE Objects
+
+Compute t-SNE for raw and normalized data with consistent parameters: perplexity set to half the maximum, 2D output, 1000 iterations, and a seed for reproducibility.
+```{r}
+set.seed(123)
+perplexity_max_value <- (nrow(raw_data) - 1) / 3  # Maximum perplexity according to the  formula
+
+# Raw t-SNE
+tsne_raw <- Rtsne(raw_data, dims = 2, perplexity = perplexity_max_value / 2, verbose = TRUE, max_iter = 1000)
+tsne_raw_data <- data.frame(tsne_raw$Y, 
+                            sex = metadata$sex, 
+                            diet = metadata$Diet, 
+                            specimen_part = metadata$specimen_part, 
+                            replicate = metadata$Replicate)
+colnames(tsne_raw_data) <- c("Dim1", "Dim2", "Sex", "Diet", "Specimen_Part", "Replicate")
+
+
+```
+
+```{r}
+# Normalized t-SNE
+tsne_normalized <- Rtsne(normalized_data, dims = 2, perplexity = perplexity_max_value / 2, verbose = TRUE, max_iter = 1000)
+tsne_normalized_data <- data.frame(tsne_normalized$Y, 
+                                   sex = metadata_norm$sex, 
+                                   diet = metadata_norm$Diet, 
+                                   specimen_part = metadata_norm$specimen_part, 
+                                   replicate = metadata_norm$Replicate)
+colnames(tsne_normalized_data) <- c("Dim1", "Dim2", "Sex", "Diet", "Specimen_Part", "Replicate")
+
+```
+
+
+##Visualize t-SNE Projections
+```{r}
+tsne_raw_data <- tsne_raw_data[!is.na(tsne_raw_data$Specimen_Part) & !is.na(tsne_raw_data$Replicate), ]
+
+raw_data_plot <- ggplot(tsne_raw_data, aes(x = Dim1, y = Dim2, color = Diet, shape = Sex, size = Specimen_Part)) +
+  geom_point() +
+  scale_shape_manual(values = c(19, 1)) +
+  scale_size_manual(values = c(2, 4)) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(title = "t-SNE Plot of Raw Data", color = "Diet", shape = "Sex", size = "Specimen Part") +
+  theme_minimal() +
+  facet_wrap(~Replicate)
+raw_data_plot
+```
+
+```{r}
+# Normalized t-SNE plot
+tsne_normalized_data <- tsne_normalized_data[!is.na(tsne_normalized_data$Specimen_Part) & !is.na(tsne_normalized_data$Replicate), ]
+normalized_data_plot <- ggplot(tsne_normalized_data, aes(x = Dim1, y = Dim2, color = Diet, shape = Sex, size = Specimen_Part)) +
+  geom_point() +
+  scale_shape_manual(values = c(19, 1)) +
+  scale_size_manual(values = c(2, 4)) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(title = "t-SNE Plot of Normalized Data", color = "Diet", shape = "Sex", size = "Specimen Part") +
+  theme_minimal() +
+  facet_wrap(~Replicate)
+
+ggarrange(raw_data_plot, normalized_data_plot, ncol = 2, common.legend = TRUE, legend = "right")
+normalized_data_plot
+
+
+```
+
+
+
+#Compare Raw and Normalized t-SNE
+
+The t-SNE plots show the difference between using raw and normalized gene expression data. In the raw data plot, the samples are spread out more randomly, which may be due to noise or uneven patterns in the data. On the other hand, the plot using normalized data shows more organized and clear groupings. This means normalization helps highlight patterns in the data, making it easier to see differences between the samples. In the normalized plot, it’s also easier to tell apart groups based on diet and sex, showing that data cleaning makes the results easier to understand. Overall, normalization helps make the patterns in gene expression more clear and meaningful.
+
+
+
+
+##Question 4 :tSNE parameters
+
+## Reproducibility
+```{r}
+library(gridExtra)
+metadata_norm$sex <- as.factor(metadata_norm$sex)
+metadata_norm$diet <- as.factor(metadata_norm$Diet)
+metadata_norm$specimen_part <- as.factor(metadata_norm$specimen_part)
+
+reproducibility_plotter <- function(normalized_data, metadata_norm) {
+  #set.seed(42)
+  
+  perplexity_max_value <- (nrow(normalized_data) - 1) / 3
+  data <- Rtsne(normalized_data, dims = 2, perplexity = round(perplexity_max_value/2), verbose = TRUE, max_iter = 1000)
+  
+  plot_tsne <- ggplot(data.frame(data$Y), 
+                aes(x = data$Y[,1], y = data$Y[,2],
+                    shape = metadata_norm$sex, size = metadata_norm$specimen_part, color = metadata_norm$diet)) +
+    geom_point() +
+    labs(x = "t-SNE 1", y = "t-SNE 2", shape = "Sex", size = "Specimen Part", color = "Diet") +
+    scale_shape_manual(values = c(19, 1)) +
+    scale_size_manual(values = c(2, 4)) +
+    scale_color_brewer(palette = "Dark2") + 
+    theme_minimal() +
+    theme(plot.title = element_text(size = 8), 
+          axis.title = element_text(size = 8),
+          axis.text = element_text(size = 7),
+          legend.key.size = unit(0.4, "cm"),
+          legend.title = element_text(size = 6),
+          legend.text = element_text(size = 6))
+  
+  return(plot_tsne)
+}
+
+list_plots_reproducibility <- list()
+for (i in 1:4) {
+  Rplot <- reproducibility_plotter(normalized_data, metadata_norm) + ggtitle(paste0("t-SNE Repetition ", i))
+  list_plots_reproducibility[[i]] <- Rplot
+}
+
+
+legend_reproducibility <- get_legend(list_plots_reproducibility[[1]])
+
+list_plots_reproducibility_lapply <- lapply(list_plots_reproducibility, "+", theme(legend.position = "none"))
+
+#2x2
+grid.arrange(
+  arrangeGrob(grobs = list_plots_reproducibility_lapply, ncol = 2),
+  legend_reproducibility,
+  ncol = 2,
+  widths = c(10, 1),
+  top = "t-SNE Repetitions"
+)
+
+```
+#comentar
+If we set a starting point at the beginning of the function, all the plots will be the same, as all the tSNE tests will follow the same "path". 
+If this starting point changes (#set.set()) each time that we execute the test for the same data the graphical representations will be different, but the clusters remains and all the representations will follow a common pattern.
+In all plots we can see three different clusters with one outlier, even if the structure is not exactly the same, the groups are rotated or organized allong a different axis a common pattern is conserved among all the repetitions with different starting points.
+
+
+## Perplexity
+
+```{r}
+
+perplexity_plotter <- function(normalized_data, metadata_norm, value_perplexity) {
+  set.seed(42)
+  value_perplexity <- round(value_perplexity)
+  perplexity_model <- Rtsne(normalized_data, dims = 2, perplexity = value_perplexity, verbose = TRUE, max_iter = 1000)
+  
+  plot_tsne <- ggplot(data.frame(perplexity_model$Y), 
+                aes(x = perplexity_model$Y[,1], y = perplexity_model$Y[,2],
+                    shape = metadata_norm$sex, size = metadata_norm$specimen_part, color = metadata_norm$diet)) +
+    geom_point() +
+    labs(x = "t-SNE 1", y = "t-SNE 2", shape = "Sex", size = "Specimen Part", color = "Diet",
+         title = paste0("t-SNE Plot for Perplexity = ", value_perplexity)) +
+    scale_shape_manual(values = c(19, 1)) +
+    scale_size_manual(values = c(2, 4)) +
+    scale_color_brewer(palette = "Dark2") + 
+    theme_minimal() +
+    theme(plot.title = element_text(size = 8), 
+          axis.title = element_text(size = 8),
+          axis.text = element_text(size = 7),
+          legend.key.size = unit(0.4, "cm"),
+          legend.title = element_text(size = 6),
+          legend.text = element_text(size = 6))
+  
+  return(plot_tsne)
+}
+
+perplexity_max_value <- (nrow(normalized_data) - 1) / 3
+perplexity_list <- c(5, perplexity_max_value/3, (perplexity_max_value/3)*2, min(perplexity_max_value, 50))
+
+list_perplexity_plots <- list()
+for (i in seq_along(perplexity_list)) {
+  value_perplexity_list <- perplexity_list[i]
+  perplexity_plot <- perplexity_plotter(normalized_data, metadata_norm, value_perplexity_list)
+  list_perplexity_plots[[i]] <- perplexity_plot
+}
+
+legend_perplexity <- get_legend(list_perplexity_plots[[1]])
+
+list_perplexity_plots_lapply <- lapply(list_perplexity_plots, "+", theme(legend.position = "none"))
+
+grid.arrange(
+  arrangeGrob(grobs = list_perplexity_plots_lapply, ncol = 2),
+  legend_perplexity,
+  ncol = 2,
+  widths = c(10, 1),
+  top = "t-SNE Perplexity"
+)
+
+
+```
+# comentar
+Perplexity defines the proximity of nearest points and set a value to focus on local or global relations in our data.
+We are able to see that for low perplexity values (5) the data points overlaps and the groups are not defined, increasing perplexity to 20 allow us to see a cluster along the x axis and some groups start to be differentiated.
+At the plot with perplexity = 40 we are able to identify clearly the clusters and the noise has been reduced.
+At high perplexity values (as in the plot for perplexity=50) the algorithm focuses in global patterns loosing information about local clusters (they are shown more compressed).
+
+
+##Iterations
+
+```{r}
+iterations_plotter <- function(normalized_data, metadata_norm, iterNum) {
+  set.seed(42)
+  perplexity_max_value <- (nrow(normalized_data) - 1) / 3
+  data <- Rtsne(normalized_data, dims = 2, perplexity = round(perplexity_max_value/2), max_iter = iterNum, verbose = TRUE)
+  
+  plot_tsne <- ggplot(data.frame(data$Y), 
+                aes(x = data$Y[,1], y = data$Y[,2], 
+                    shape = metadata_norm$sex, size = metadata_norm$specimen_part, color = metadata_norm$diet)) +
+    geom_point() +
+    labs(x = "t-SNE 1", y = "t-SNE 2", shape = "Sex", size = "Specimen Part", color = "Diet",
+         title = paste0("t-SNE with ", iterNum, " Iterations")) +
+    scale_shape_manual(values = c(19, 1)) +
+    scale_size_manual(values = c(2, 4)) +
+    scale_color_brewer(palette = "Dark2") +
+    theme_minimal() +
+    theme(plot.title = element_text(size = 8), 
+          axis.title = element_text(size = 8),
+          axis.text = element_text(size = 7),
+          legend.key.size = unit(0.4, "cm"),
+          legend.title = element_text(size = 6),
+          legend.text = element_text(size = 6))
+  
+  return(plot_tsne)
+}
+
+iterations <- c(100, 500, 1000, 2000)
+
+list_iterations_plots <- list()
+for (i in seq_along(iterations)) {
+  value_iteration <- iterations[i]
+  iteration_plot <- iterations_plotter(normalized_data, metadata_norm, value_iteration)
+  list_iterations_plots[[i]] <- iteration_plot
+}
+
+legend_iterations <- get_legend(list_iterations_plots[[1]])
+
+list_iterations_plots_lapply <- lapply(list_iterations_plots, "+", theme(legend.position = "none"))
+
+
+grid.arrange(
+  arrangeGrob(grobs = list_iterations_plots_lapply, ncol = 2),
+  legend_iterations,
+  ncol = 2,
+  widths = c(10, 1),
+  top = "t-SNE Iterations"
+)
+```
+
+#comentar
+This parameter is used to set for how long the algorithm optimizes the representation of the data in the tSNE, controlling the number of steps performed by the algorithm, by default this parameter is set to 1000.
+Low iterations values (=100) leads to incomplete models where the groups are not processed enough and the relations between data points are not well defined, we can see this comparing the two first plots.
+At 500 iterations the general patterns start to be clear but we can see that the clusters are much better defined if the iteration value is set to 1000.
+Comparing the results for 1000 and 2000 iterations we observe practically the same structure, doing twice the iterations our results have the same appearance so this last 1000 iterations can be avoided in order to reduce the computational work as the analytical gain is minimal.
+
+
+# PCA result
+
+At first, we performed an initial PCA that as we are able to see in the first barplot is clearly not scaled, so that we have scaled our PCA, removed outliers and normalized our data.
+
+Once we reduced the batch effect, we performed a PCA with varaibles Sex and Diet.
+
+Where each point on the PCA plot corresponds to a sample, and the data have been grouped by diet type and sex.
+
+The two axes, PC1 and PC2, represent the first and second principal components, which together capture the majority of variation in the dataset. 
+
+The red and blue groups (HighFat and Regular diets) mostly form separate clusters, meaning that diet is a strong factor influencing gene expression patterns.
+This separation primarily occurs along PC1, suggesting that PC1 captures variation largely driven by diet.
+
+Although the effect of sex is not as dominant as diet, we do observe some clustering by sex, especially at the extremes of the PCA plot. For instance, several male samples on the regular diet cluster tightly on the far right, while female samples on the high-fat diet appear grouped on the far left. This suggests that sex may modulate the gene expression response to diet.
+
+The more spread out the clusters are from each other, particularly along the PC1 and PC2 axes, the stronger the evidence that diet explains most variation in our data. 
+
+Overall, this plot evidences that dietary differences, specifically a high-fat versus regular diet, are associated with distinct gene expression signatures, which may reflect underlying biological processes influenced by nutritional intake. 
+
+```{r}
+ggplot(data_plot_norm, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Diet, shape = Sex), size = 3, alpha = 0.8) +
+  geom_label_repel(aes(label = ID), max.overlaps = 10) + 
+  geom_encircle(aes(group = Diet, color = Diet), 
+                expand = 0.05, 
+                linetype = "dashed", 
+                size = 1, 
+                alpha = 0.5) +
+  scale_color_brewer(palette = "Set2") +
+  labs(
+    title = "PCA of Gene Expression (Normalized, Outlier Removed)",
+    x = "PC1",
+    y = "PC2",
+    color = "Diet",
+    shape = "Sex"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r}
+tsne_normalized_data <- tsne_normalized_data[!is.na(tsne_normalized_data$Specimen_Part) & !is.na(tsne_normalized_data$Replicate), ]
+normalized_data_plot <- ggplot(tsne_normalized_data, aes(x = Dim1, y = Dim2, color = Diet, shape = Sex, size = Specimen_Part)) +
+  geom_point() +
+  scale_shape_manual(values = c(19, 1)) +
+  scale_size_manual(values = c(2, 4)) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(title = "t-SNE Plot of Normalized Data", color = "Diet", shape = "Sex", size = "Specimen Part") +
+  theme_minimal() +
+  facet_wrap(~Replicate)
+
+```
+
